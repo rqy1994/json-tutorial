@@ -8,6 +8,7 @@
 #include <math.h>    /* HUGE_VAL */
 #include <stdlib.h>  /* NULL, malloc(), realloc(), free(), strtod() */
 #include <string.h>  /* memcpy() */
+#include <ctype.h>
 
 #ifndef LEPT_PARSE_STACK_INIT_SIZE
 #define LEPT_PARSE_STACK_INIT_SIZE 256
@@ -16,6 +17,7 @@
 #define EXPECT(c, ch)       do { assert(*c->json == (ch)); c->json++; } while(0)
 #define ISDIGIT(ch)         ((ch) >= '0' && (ch) <= '9')
 #define ISDIGIT1TO9(ch)     ((ch) >= '1' && (ch) <= '9')
+#define ISCHARATOF(ch)	(((ch) >= 'a' && (ch) <= 'f') || ((ch) >= 'A' && (ch) <= 'F'))
 #define PUTC(c, ch)         do { *(char*)lept_context_push(c, sizeof(char)) = (ch); } while(0)
 
 typedef struct {
@@ -89,14 +91,45 @@ static int lept_parse_number(lept_context* c, lept_value* v) {
     c->json = p;
     return LEPT_PARSE_OK;
 }
-
+//解析4位16进制数字，存储为码点u，成功时返回解析后的文本指针，如失败返回NULL
 static const char* lept_parse_hex4(const char* p, unsigned* u) {
     /* \TODO */
+	int i;
+	*u = 0;
+	for (i = 0; i < 4; ++i) {
+		char c = toupper(*p);
+		if (ISDIGIT(c) || ISCHARATOF(c)) {
+			*u = (*u << 4) + (c >= 'A' ? c - 'A' + 10 : c - '0');
+			++p;
+		}
+		else {
+			return NULL;
+		}
+	}
     return p;
 }
 
 static void lept_encode_utf8(lept_context* c, unsigned u) {
     /* \TODO */
+	assert(u >= 0 && u <= 0x10ffff);
+	if (u <= 0x7f) {//码点位数为7，1个字节
+		PUTC(c, u);
+	}
+	else if (u <= 0x7ff) {//码点位数为11，2个字节
+		PUTC(c, 0xC0 | ((u >> 6) & 0x1F));
+		PUTC(c, 0x80 | (u & 0x3F));
+	}
+	else if (u <= 0xffff) {//码点位数为16，3个字节
+		PUTC(c, 0xE0 | ((u >> 12) & 0xFF));//0xE0 = 11100000
+		PUTC(c, 0x80 | ((u >> 6) & 0x3F));//0x80 = 10000000
+		PUTC(c, 0x80 | (u & 0x3F));//0x3F = 00111111
+	}
+	else {//码点位数为21，4个字节
+		PUTC(c, 0xF0 | ((u >> 18) & 0x07));
+		PUTC(c, 0x80 | ((u >> 12) & 0x3F));
+		PUTC(c, 0x80 | ((u >> 6) & 0x3F));
+		PUTC(c, 0x80 | (u & 0x3F));
+	}
 }
 
 #define STRING_ERROR(ret) do { c->top = head; return ret; } while(0)
@@ -129,6 +162,18 @@ static int lept_parse_string(lept_context* c, lept_value* v) {
                         if (!(p = lept_parse_hex4(p, &u)))
                             STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_HEX);
                         /* \TODO surrogate handling */
+						if (u >= 0xD800 && u <= 0xDBFF) {//高代理项
+							unsigned H = u;
+							p += 2;//跳过\u
+							if (!(p = lept_parse_hex4(p, &u)))
+								STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+							unsigned L = u;
+							if (L >= 0xDC00 && L <= 0xDFFF) {//低代理项
+								u = 0x10000 + (H - 0xD800) * 0x400 + (L - 0xDC00);
+							}
+							else
+								STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+						}
                         lept_encode_utf8(c, u);
                         break;
                     default:

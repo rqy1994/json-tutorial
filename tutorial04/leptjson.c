@@ -164,7 +164,10 @@ static int lept_parse_string(lept_context* c, lept_value* v) {
                         /* \TODO surrogate handling */
 						if (u >= 0xD800 && u <= 0xDBFF) {//高代理项
 							unsigned H = u;
-							p += 2;//跳过\u
+							if (*p++ != '\\')
+								STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
+							if (*p++ != 'u')
+								STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
 							if (!(p = lept_parse_hex4(p, &u)))
 								STRING_ERROR(LEPT_PARSE_INVALID_UNICODE_SURROGATE);
 							unsigned L = u;

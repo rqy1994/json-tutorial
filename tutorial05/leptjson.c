@@ -255,13 +255,17 @@ int lept_parse(lept_value* v, const char* json) {
 void lept_free(lept_value* v) {
     assert(v != NULL);
     if (v->type == LEPT_STRING)
-        free(v->u.s.s);
-	//else if (v->type == LEPT_ARRAY) {
-	//	size_t i = 0, size = lept_get_array_size(v);
-	//	for (i = 0; i < size; ++i) {
-	//		free(lept_get_array_element(v, i));
-	//	}
-	//}
+        free(v->u.s.s);	
+	else if (v->type == LEPT_ARRAY) {
+		lept_value *ele;
+		size_t i, size = lept_get_array_size(v);
+		for(i = 0; i <  size; ++i){
+			ele = lept_get_array_element(v, i);
+			if (ele->type == LEPT_ARRAY || ele->type == LEPT_STRING)//对数组元素中的array和string进行处理
+				lept_free(ele);
+		}
+		free(v->u.a.e);//数组中元素内存分配连续，所以不需要一个一个的删除。
+	}
     v->type = LEPT_NULL;
 }
 

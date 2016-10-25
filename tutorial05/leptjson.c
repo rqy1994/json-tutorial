@@ -199,8 +199,15 @@ static int lept_parse_array(lept_context* c, lept_value* v) {
         lept_value e;
         lept_init(&e);
 		lept_parse_whitespace(c);
-        if ((ret = lept_parse_value(c, &e)) != LEPT_PARSE_OK)
-            return ret;
+		if ((ret = lept_parse_value(c, &e)) != LEPT_PARSE_OK) {
+			//当parse出错时，需要清空动态栈中已存在的元素
+			size_t i = size;//动态栈中元素个数，（c->size表示动态栈容量，并不表示元素个数，开始犯了这个错误）
+			while (i--) {
+				lept_free((lept_value *)lept_context_pop(c, sizeof(lept_value)));//主要针对动态栈中的string和array，因为它们两个开辟了额外空间
+				//pop所有元素后c->top == 0, 动态栈在lept_parse结尾被free。
+			}
+			return ret;
+		}
         memcpy(lept_context_push(c, sizeof(lept_value)), &e, sizeof(lept_value));
         size++;
 		lept_parse_whitespace(c);

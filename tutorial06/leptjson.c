@@ -127,8 +127,8 @@ static void lept_encode_utf8(lept_context* c, unsigned u) {
 
 #define STRING_ERROR(ret) do { c->top = head; return ret; } while(0)
 
-/* è§£æž JSON å­—ç¬¦ä¸²ï¼ŒæŠŠç»“æžœå†™å…¥ str å’Œ len */
-/* str æŒ‡å‘ c->stack ä¸­çš„å…ƒç´ ï¼Œéœ€è¦åœ¨ c->stack  */
+/* ½âÎö JSON ×Ö·û´®£¬°Ñ½á¹ûÐ´Èë str ºÍ len */
+/* str Ö¸Ïò c->stack ÖÐµÄÔªËØ£¬ÐèÒªÔÚ c->stack  */
 static int lept_parse_string_raw(lept_context *c, char **str, size_t *len)
 {
     // size_t head = c->top, len;
@@ -190,11 +190,9 @@ static int lept_parse_string(lept_context *c, lept_value *v){
     int ret;
     char *s;
     size_t len;
-    if((ret = lept_parse_string_raw(c, &s, &len)) == LEPT_PARSE_OK){
+    if ((ret = lept_parse_string_raw(c, &s, &len)) == LEPT_PARSE_OK)
         lept_set_string(v, s, len);
-    }
     return ret;
-    
 }
 
 static int lept_parse_value(lept_context* c, lept_value* v);
@@ -260,7 +258,32 @@ static int lept_parse_object(lept_context* c, lept_value* v) {
     for (;;) {
         lept_init(&m.v);
         /* \todo parse key to m.k, m.klen */
+		if (*c->json != '\"') {//ÕâÀïÎªÊ²Ã´²»×ªÒå£¿
+			ret = LEPT_PARSE_MISS_KEY;
+			break;
+		}
+		/*c->json++;
+		ÕâÀïÊÇ¸öbug£¬ºÜ¾Ã²ÅÕÒµ½¡£½øÐÐ×ÔÔö²Ù×÷¶à´ËÒ»¾Ù£¬ÒòÎª½ÓÏÂÀ´µÄlept_parse_string_raw()²Ù×÷
+		»á½øÐÐEXPECT('\"')²Ù×÷¡£*/
+
+		char *str;
+		size_t len;
+		if ((ret = lept_parse_string_raw(c, &str, &len)) != LEPT_PARSE_OK) {
+			break;
+		}
+		m.k = (char *)malloc(len + 1);
+		memcpy(m.k, str, len + 1);
+		m.klen = len;//¼üµÄ³¤¶È
+
         /* \todo parse ws colon ws */
+		lept_parse_whitespace(c);//½âÎö¿Õ¸ñ
+		if (*c->json != ':') {
+			ret = LEPT_PARSE_MISS_COLON;
+			break;
+		}
+		c->json++;//½âÎöÃ°ºÅ
+		lept_parse_whitespace(c);//½âÎö¿Õ¸ñ
+
         /* parse value */
         if ((ret = lept_parse_value(c, &m.v)) != LEPT_PARSE_OK)
             break;
@@ -268,8 +291,34 @@ static int lept_parse_object(lept_context* c, lept_value* v) {
         size++;
         m.k = NULL; /* ownership is transferred to member on stack */
         /* \todo parse ws [comma | right-curly-brace] ws */
+		//½âÎö¶ººÅ»òÕßÓÒÀ¨ºÅ
+		lept_parse_whitespace(c);
+		if (*c->json == ',') {
+			c->json++;
+			lept_parse_whitespace(c);
+		}
+		else if (*c->json == '}') {//ÒâÎ¶×Åobject½âÎö½áÊø
+			c->json++;
+			size_t s = size * sizeof(lept_member);
+			v->type = LEPT_OBJECT;
+			memcpy((v->u.o.m = (lept_member*)malloc(s)), lept_context_pop(c, s), s);
+			v->u.o.size = size;
+			return LEPT_PARSE_OK;
+		}
+		else {
+			ret = LEPT_PARSE_MISS_COMMA_OR_CURLY_BRACKET;
+			break;
+		}
     }
     /* \todo Pop and free members on the stack */
+	//Èç¹û½âÎö¹ý³Ì³öÏÖ´íÎó£¬Õ»¿Õ¼ä»áÓÐ²ÐÁô
+	free(m.k);
+	size_t i;
+	for (i = 0; i < size; i++) {
+		lept_member *m = lept_context_pop(c, sizeof(lept_member));
+		free(m->k);
+		lept_free(&m->v);
+	}
     return ret;
 }
 
@@ -319,6 +368,12 @@ void lept_free(lept_value* v) {
                 lept_free(&v->u.a.e[i]);
             free(v->u.a.e);
             break;
+		case LEPT_OBJECT:
+			for (i = 0; i < v->u.o.size; i++) {
+				free(v->u.o.m[i].k);//É¾³ý¼ü£¬¼´×Ö·û´®
+				lept_free(&v->u.o.m[i].v);//É¾³ýÖµ£¬¼´lept_value v
+			}
+			free(v->u.o.m);//É¾³ýobjectÊý×é£¬ÆäÄÚ´æÀ´ÄÚÐè
         default: break;
     }
     v->type = LEPT_NULL;
